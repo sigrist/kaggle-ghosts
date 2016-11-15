@@ -1,0 +1,143 @@
+---
+title: "Ghosts"
+author: "Paulo Sigrist"
+date: "11/14/2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+library('dplyr') # data manipulation
+library('ggplot2') # visualization
+library('ggthemes') # visualization
+library('mice')
+library('randomForest') # prediction
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Kaggle - Ghosts Competition
+
+First, load data:
+
+```{r}
+# Load data
+train <- read.csv('train.csv', stringsAsFactors = T)
+test  <- read.csv('test.csv', stringsAsFactors = T)
+
+
+theColors <- levels(factor(train$color))
+# Train - 371 x 7
+# Test  - 529 x 6
+
+full <- bind_rows(train, test)
+
+ghosts <- train[train$type == 'Ghost',]
+ghouls <- train[train$type == 'Ghoul',]
+goblins <- train[train$type == 'Goblin',]
+
+```
+
+Data fields
+
+id - id of the creature
+bone_length - average length of bone in the creature, normalized between 0 and 1
+rotting_flesh - percentage of rotting flesh in the creature
+hair_length - average hair length, normalized between 0 and 1
+has_soul - percentage of soul in the creature
+color - dominant color of the creature: 'white','black','clear','blue','green','blood'
+type - target variable: 'Ghost', 'Goblin', and 'Ghoul'
+
+
+## Simple Random Forrest
+
+First attempt is to try to use Random Forrest and the type is based on the other features
+```{r}
+set.seed(754)
+
+
+# 
+rf_model <- randomForest(factor(type) ~ bone_length + rotting_flesh + hair_length + has_soul + color, data = train)
+
+# Obter a importancia de cada var
+importance <- importance(rf_model)
+varImportance <- data.frame(Variables = row.names(importance), Importance = round(importance[,'MeanDecreaseGini'],2))
+
+# Criar um rank
+rankImportance <- varImportance %>% mutate(Rank = paste0('#', dense_rank(desc(Importance))))
+
+
+ggplot(rankImportance, aes(x = reorder(Variables, Importance), 
+    y = Importance, fill = Importance)) +
+  geom_bar(stat='identity') + 
+  geom_text(aes(x = Variables, y = 0.5, label = Rank),
+    hjust=0, vjust=0.55, size = 4, colour = 'red') +
+  labs(x = 'Variables') +
+  coord_flip() + 
+  theme_few()
+```
+
+We can see that `hair_length` and `has_soul` are the two most important features. Let's see in a scatter plot:
+
+```{r}
+ggplot(train, aes(x = hair_length, y = has_soul, shape = type, color = type)) + geom_point()
+```
+
+As we can see, there is a concentration of ghosts in the left bottom part, a concentration of goblins in the middle, and ghouls in the top right of the chart.
+
+The first conclusion is that ghosts have less hair and soul, ghouls have more hair and soul, and goblins are in the middle.
+
+There are 4 creatures that are close to each other, two ghosts, a ghoul and a goblin, with close hair size e soul. What the difference between them? Let's find this 4 guys and see!
+
+```{r}
+creatures <- train[train$has_soul > 0.30 & train$has_soul < 0.375 & train$hair_length > 0.425 & train$hair_length < 0.475,]
+creatures
+ggplot(creatures, aes(x = hair_length, y = has_soul, shape = type, color = type)) + geom_point()
+
+```
+
+
+```{r}
+# Bone length by color
+ggplot(ghosts, aes(color, bone_length)) + geom_boxplot() + geom_jitter(width = 0.2)
+ggplot(ghouls, aes(color, bone_length)) + geom_boxplot() + geom_jitter(width = 0.2)
+ggplot(goblins, aes(color, bone_length)) + geom_boxplot() + geom_jitter(width = 0.2)
+
+# Rotting flesh by color
+ggplot(ghosts, aes(color, rotting_flesh)) + geom_boxplot() + geom_jitter(width = 0.2)
+ggplot(ghouls, aes(color, rotting_flesh)) + geom_boxplot() + geom_jitter(width = 0.2)
+ggplot(goblins, aes(color, rotting_flesh)) + geom_boxplot() + geom_jitter(width = 0.2)
+
+# Hair length by color
+ggplot(ghosts, aes(color, hair_length)) + geom_boxplot() + geom_jitter(width = 0.2)
+ggplot(ghouls, aes(color, hair_length)) + geom_boxplot() + geom_jitter(width = 0.2)
+ggplot(goblins, aes(color, hair_length)) + geom_boxplot() + geom_jitter(width = 0.2)
+
+# Soul by color
+ggplot(ghosts, aes(color, has_soul)) + geom_boxplot() + geom_jitter(width = 0.2)
+ggplot(ghouls, aes(color, has_soul)) + geom_boxplot() + geom_jitter(width = 0.2)
+ggplot(goblins, aes(color, has_soul)) + geom_boxplot() + geom_jitter(width = 0.2)
+
+
+```
+
+## First submission
+
+Without further analysis, let's run the prediction with the Random Forrest and see the results!
+```{r}
+
+prediction <- predict(rf_model, test)
+
+test$type <- prediction
+
+ggplot(test, aes(x = hair_length, y = has_soul, shape = type, color = type)) + geom_point()
+```
+
+### Saving the results
+```{r}
+# Save the solution to a dataframe with two columns: PassengerId and Survived (prediction)
+solution <- data.frame(id = test$id, type = test$type)
+
+# Write the solution to file
+write.csv(solution, file = 'rf_mod_Solution1.csv', row.names = F)
+```
+
