@@ -12,6 +12,7 @@ library('ggplot2') # visualization
 library('ggthemes') # visualization
 library('mice')
 library('randomForest') # prediction
+
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
@@ -79,7 +80,9 @@ ggplot(rankImportance, aes(x = reorder(Variables, Importance),
 We can see that `hair_length` and `has_soul` are the two most important features. Let's see in a scatter plot:
 
 ```{r}
-ggplot(train, aes(x = hair_length, y = has_soul, shape = type, color = type)) + geom_point()
+ggplot(train, aes(x = hair_length, y = has_soul, shape = type, color = type)) + geom_point() + 
+  geom_vline(xintercept = 0.42, color="red") + geom_vline(xintercept = 0.475, color="red") + 
+  geom_hline(yintercept = 0.30, color="red") + geom_hline(yintercept = 0.375, color="red")
 ```
 
 As we can see, there is a concentration of ghosts in the left bottom part, a concentration of goblins in the middle, and ghouls in the top right of the chart.
@@ -120,11 +123,90 @@ ggplot(goblins, aes(color, has_soul)) + geom_boxplot() + geom_jitter(width = 0.2
 
 ```
 
-## First submission
 
-Without further analysis, let's run the prediction with the Random Forrest and see the results!
+```{r}
+ggplot(train, aes(type, bone_length)) + geom_boxplot() + labs(title="Type x Bone Length") + geom_jitter(width = 0.2)
+ggplot(train, aes(type, rotting_flesh)) + geom_boxplot() + labs(title="Type x Rotting Flesh") + geom_jitter(width = 0.2)
+ggplot(train, aes(type, hair_length)) + geom_boxplot() + labs(title="Type x Hair Length") + geom_jitter(width = 0.2)
+ggplot(train, aes(type, has_soul)) + geom_boxplot() + labs(title="Type x Has Soul") + geom_jitter(width = 0.2)
+```
+
+
+## Outliers
+
+Looking the data distribution, we can see a lot of outliers in the training data
+
+### By color
+
+As we saw, Hair Length and Soul are the features that mainly differantiate the creatures. Let's run a K-Means, with K = 3 (types of creatures) using this two features, and see the results
+
 ```{r}
 
+train$colorAsInteger <- as.integer(train$color)
+# Run K-Means for Hair and Soul fatures
+theCluster <- kmeans(train[,c(4,5)], 3)
+# Add the cluster into the test dataset
+train$clusterByHairSoul <- theCluster$cluster
+
+# See the results
+ggplot(train, aes(x = hair_length, y = has_soul, shape = type, color = clusterByHairSoul)) + geom_point()
+
+
+```
+
+We can see the cluster is accurate, but we have some creatures classified as others, let's classify this creatures as outliers.
+
+```{r}
+table(train[train$type == 'Ghost',]$clusterByHairSoul)
+table(train[train$type == 'Ghoul',]$clusterByHairSoul)
+table(train[train$type == 'Goblin',]$clusterByHairSoul)
+
+# None is an outlier
+train$outlier <- FALSE
+
+# Ghosts
+clusterGhosths <- which(table(train[train$type == 'Ghost',]$clusterByHairSoul) == max(table(train[train$type == 'Ghost',]$clusterByHairSoul)))
+train[train$type == 'Ghost' & train$clusterByHairSoul != clusterGhosths,]$outlier = TRUE
+
+# Ghouls
+clusterGhouls <- which(table(train[train$type == 'Ghoul',]$clusterByHairSoul) == max(table(train[train$type == 'Ghoul',]$clusterByHairSoul)))
+train[train$type == 'Ghoul' & train$clusterByHairSoul != clusterGhouls,]$outlier = TRUE
+
+# Goblins
+clusterGoblins <- which(table(train[train$type == 'Goblin',]$clusterByHairSoul) == max(table(train[train$type == 'Goblin',]$clusterByHairSoul)))
+train[train$type == 'Goblin' & train$clusterByHairSoul != clusterGoblins,]$outlier = TRUE
+
+ggplot(train, aes(x = hair_length, y = has_soul, shape = type, color = outlier)) + geom_point()
+
+```
+
+
+## Second attempt
+
+```{r}
+rf_model <- randomForest(factor(type) ~ bone_length + rotting_flesh + hair_length + has_soul + color, data = train[train$outlier == FALSE,])
+
+# Obter a importancia de cada var
+importance <- importance(rf_model)
+varImportance <- data.frame(Variables = row.names(importance), Importance = round(importance[,'MeanDecreaseGini'],2))
+
+# Criar um rank
+rankImportance <- varImportance %>% mutate(Rank = paste0('#', dense_rank(desc(Importance))))
+
+
+ggplot(rankImportance, aes(x = reorder(Variables, Importance), 
+    y = Importance, fill = Importance)) +
+  geom_bar(stat='identity') + 
+  geom_text(aes(x = Variables, y = 0.5, label = Rank),
+    hjust=0, vjust=0.55, size = 4, colour = 'red') +
+  labs(x = 'Variables') +
+  coord_flip() + 
+  theme_few()
+
+```
+
+### The Prediction
+```{r}
 prediction <- predict(rf_model, test)
 
 test$type <- prediction
@@ -132,12 +214,13 @@ test$type <- prediction
 ggplot(test, aes(x = hair_length, y = has_soul, shape = type, color = type)) + geom_point()
 ```
 
-### Saving the results
 ```{r}
 # Save the solution to a dataframe with two columns: PassengerId and Survived (prediction)
 solution <- data.frame(id = test$id, type = test$type)
 
 # Write the solution to file
-write.csv(solution, file = 'rf_mod_Solution1.csv', row.names = F)
+write.csv(solution, file = 'rf_mod_Solution2.csv', row.names = F)
 ```
+
+
 
